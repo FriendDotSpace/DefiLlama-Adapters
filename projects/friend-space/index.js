@@ -1,51 +1,45 @@
-const { ethers } = require("ethers");
-const { getLogs } = require('../helper/cache/getLogs');
+const { get } = require('../helper/http');
 const ADDRESSES = require('../helper/coreAssets.json');
-
-const TRADE_EVENT_ABI = [
-  "event Trade(uint256 indexed tokenId, address indexed trader, address indexed subject, bool isBuy, uint256 shareAmount, uint256 tokenAmount, uint256 supply)"
-];
-
-// FriendKey contract address
-const CONTRACT_ADDRESS = "0xdfD77610dd30A21385b1B4C3AA6D20069624F792";
 
 const USDC = ADDRESSES.base.USDC;
 
+const API_BASE_URL = 'https://api.friend.space/api';
 async function tvl(api) {
-  // Get all Trade event logs from the contract
-  // Note: This function automatically supports historical TVL queries!
-  // When DefiLlama queries for a specific day/timestamp, api.block will be set to that block,
-  // and getLogs will automatically query events up to that block (via api.block as toBlock)
-  // fromBlock: deployment block number for efficiency
-  const tradeLogs = await getLogs({
-    api,
-    target: CONTRACT_ADDRESS,
-    eventAbi: TRADE_EVENT_ABI[0],
-    fromBlock: 39282576, // Deployment block - getLogs uses api.block as toBlock for historical queries
-    onlyArgs: true,
-  });
-
-  // Sum all tokenAmount values from Trade events
-  // Trade event args: {tokenId, trader, subject, isBuy, shareAmount, tokenAmount, supply}
-  // When onlyArgs: true, ethers returns an object with named properties
-  let totalTokenAmount = BigInt(0);
-  for (const log of tradeLogs) {
-    // Access tokenAmount from the parsed event arguments
-    const tokenAmount = BigInt(log.tokenAmount?.toString() || '0');
-    totalTokenAmount += tokenAmount;
+  try {
+    const url = `${API_BASE_URL}/tvl/total?timestamp=${api.timestamp}`;
+    // Option 3: Pass timestamp and other params as query parameters
+    // const url = `${API_BASE_URL}/tvl?timestamp=${api.timestamp}&chain=base`;
+    
+    // Option 4: Use axios params option for cleaner query params
+    // const data = await get(`${API_BASE_URL}/tvl`, {
+    //   params: {
+    //     timestamp: api.timestamp,
+    //     chain: api.chain,
+    //     // day: Math.floor(api.timestamp / 86400), // Convert to day if needed
+    //   }
+    // });
+    
+    // Call the API to get TVL data
+    const data = await get(url);
+    
+    const tvlAmount = data.totalTvl;
+    // Add USDC amount to the API
+    // TVL amount should be in the smallest unit (6 decimals for USDC)
+    api.add(USDC, tvlAmount.toString());
+    
+    return api.getBalances();
+  } catch (error) {
+    console.error('Error fetching TVL from API:', error.message);
+    throw error;
   }
-
-  // Add the total to the API
-  api.add(USDC, totalTokenAmount.toString());
-
-  return api.getBalances();
 }
 
 module.exports = {
-  methodology: 'TVL is calculated by summing all tokenAmount values emitted in Trade events from the FriendSpace contract. This represents the cumulative total value of all trades executed on the protocol.',
+  methodology: 'TVL is calculated by fetching the total value locked from the FriendSpace API endpoint at the queried timestamp. This represents the total value of all assets locked in the protocol at that specific point in time.',
 
   base: {
     tvl: tvl,
-    start: 1765272702, // timestamp of deployment sc
+    start: 1767689090, // timestamp of project
   },
 };
+
